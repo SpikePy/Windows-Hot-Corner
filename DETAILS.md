@@ -30,7 +30,7 @@ the corner's area counts as part of the edge.
 mouse hook still sees how far the mouse tried to move past it, and that
 movement is added up while the pointer stays in the zone. Only once it
 reaches `push_px` does the `delay_ms` countdown start. Mouse acceleration
-applies, so a quick shove counts for more than a slow one. Drifting off
+applies, so a quick shove counts for more than a slow one. Leaving
 the zone starts the count over.
 
 While `autostart` is `true`, the app makes sure the Startup folder holds
@@ -94,12 +94,11 @@ package listens for the `TaskbarCreated` broadcast and adds the icon back.
   like (-3, 0). `hotzone.Clamp` moves those back onto the screen (they're
   still in the corner) and reports the overshoot, which `push_px` adds up.
 - `internal/hotzone` turns that into a zone (`Hit`) and decides when to
-  act (`Tracker`): hitting a zone starts a timer for `delay_ms`. It keeps
-  running while the pointer stays within 8 pixels of a zone, so a hand
-  nudging the mouse back a pixel, or sliding from an edge into its corner,
-  neither cancels nor restarts it; drifting further cancels it. Once Task
-  View opened the pointer has to get
-  50 pixels clear of every zone before it can trigger again. So neither
+  act (`Tracker`): hitting a zone starts a timer for `delay_ms`, which
+  only runs while the pointer stays in a zone - leaving by a single pixel
+  cancels it, so Task View opens only once the pointer has rested there
+  for the whole delay. Sliding from an edge into its corner doesn't
+  restart it. Once Task View opened the pointer has to get 50 pixels clear of every zone before it can trigger again. So neither
   resting in a corner nor the pointer wobbling back onto the edge as you
   move away presses `Win+Tab` a second time, which would close Task View.
 - When the timer fires, the app presses `Win+Tab` with `SendInput`, which

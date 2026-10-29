@@ -126,12 +126,11 @@ func TestHitOnASecondMonitor(t *testing.T) {
 // step is one call to the Tracker in a scripted sequence: a move, or the
 // delay timer running out (elapsed).
 type step struct {
-	// The zones the pointer is in, as Hit, Hold and Near report them. An
-	// unset hold is taken to be hit, an unset near to be hold, since each
-	// area contains the one before.
-	hit, hold, near Zone
-	push            int32
-	elapsed         bool
+	// The zones the pointer is in, as Hit and Near report them. An unset
+	// near is taken to be hit, since Near's area contains Hit's.
+	hit, near Zone
+	push      int32
+	elapsed   bool
 	// What the call should return: arm/disarm for a move, fire for an
 	// elapsed timer.
 	arm, disarm, fire bool
@@ -153,11 +152,11 @@ func TestTracker(t *testing.T) {
 			{hit: TopLeft},
 			{elapsed: true, fire: true},
 		}},
-		{"drifting a few pixels off the zone keeps the delay running", 0, []step{
+		{"leaving the zone by a pixel cancels the delay", 0, []step{
 			{hit: TopLeft, arm: true},
-			{hold: TopLeft},
-			{hit: TopLeft},
-			{hold: TopLeft},
+			{near: TopLeft, disarm: true},
+			{elapsed: true, fire: false},
+			{hit: TopLeft, arm: true},
 			{elapsed: true, fire: true},
 		}},
 		{"leaving before the delay cancels", 0, []step{
@@ -248,16 +247,13 @@ func TestTracker(t *testing.T) {
 					}
 					continue
 				}
-				hold, near := s.hold, s.near
-				if hold == None {
-					hold = s.hit
-				}
+				near := s.near
 				if near == None {
-					near = hold
+					near = s.hit
 				}
-				arm, disarm := tr.Move(s.hit, hold, near, s.push)
+				arm, disarm := tr.Move(s.hit, near, s.push)
 				if arm != s.arm || disarm != s.disarm {
-					t.Fatalf("step %d: Move(%v, %v, %v, %d) = %t, %t; want %t, %t", i, s.hit, hold, near, s.push, arm, disarm, s.arm, s.disarm)
+					t.Fatalf("step %d: Move(%v, %v, %d) = %t, %t; want %t, %t", i, s.hit, near, s.push, arm, disarm, s.arm, s.disarm)
 				}
 			}
 		})
@@ -287,25 +283,6 @@ func TestClamp(t *testing.T) {
 				t.Errorf("Clamp(%d, %d) = %d, %d, %d; want %d, %d, %d", tt.x, tt.y, x, y, push, tt.wantX, tt.wantY, tt.push)
 			}
 		})
-	}
-}
-
-func TestHold(t *testing.T) {
-	m := Rect{0, 0, 1920, 1080}
-	all := Open{true, true, true, true}
-	for _, tt := range []struct {
-		x, y int32
-		want Zone
-	}{
-		{0, 0, TopLeft},
-		{3, 2, TopLeft},
-		{HoldDistance, HoldDistance, TopLeft},
-		{0, CornerSize + HoldDistance, None},
-		{HoldDistance + 1, HoldDistance + 1, None},
-	} {
-		if got := Hold(tt.x, tt.y, m, all, TopLeft); got != tt.want {
-			t.Errorf("Hold(%d, %d) = %v, want %v", tt.x, tt.y, got, tt.want)
-		}
 	}
 }
 

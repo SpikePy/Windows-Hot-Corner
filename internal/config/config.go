@@ -63,8 +63,8 @@ enabled: %t
 # another monitor never triggers. Override with -hot-zones.
 hot_zones: %s
 
-# delay_ms: how long, in milliseconds, the mouse has to rest in a hot zone
-# before Task View opens (0-5000). Raise it if it opens by accident.
+# delay_ms: how long, in milliseconds, the mouse has to stay in a hot zone
+# before Task View opens (0-5000); leaving it earlier cancels. Raise it if it opens by accident.
 # Override with -delay-ms.
 delay_ms: %d
 
