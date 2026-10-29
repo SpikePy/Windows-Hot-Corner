@@ -105,6 +105,7 @@ type Hook struct {
 	settings Settings
 	logf     func(format string, args ...any)
 	tracker  hotzone.Tracker
+	armedAt  time.Time // when the pending timer was started, for the log
 }
 
 // New returns a hook that opens Task View for the zones and delay
@@ -146,11 +147,15 @@ func (h *Hook) Uninstall() {
 func (h *Hook) proc(nCode, wParam, lParam uintptr) uintptr {
 	if int32(nCode) == hcAction && wParam == wmMouseMove {
 		ms := (*msllhookstruct)(unsafe.Pointer(lParam))
-		arm, disarm := h.tracker.Move(h.zonesAt(ms.X, ms.Y))
+		hit, hold, near := h.zonesAt(ms.X, ms.Y)
+		arm, disarm := h.tracker.Move(hit, hold, near)
 		switch {
 		case arm:
+			h.armedAt = time.Now()
+			h.logf("Pointer hit %v at (%d, %d), opening Task View in %v", hit, ms.X, ms.Y, h.settings.Delay())
 			h.startTimer(hotzone.Timer(h.settings.Delay()))
 		case disarm:
+			h.logf("Pointer left at (%d, %d) after %v, cancelled", ms.X, ms.Y, time.Since(h.armedAt).Round(time.Millisecond))
 			h.stopTimer()
 		}
 	}
@@ -158,30 +163,30 @@ func (h *Hook) proc(nCode, wParam, lParam uintptr) uintptr {
 	return r0
 }
 
-// zonesAt returns the enabled hot zone at (x, y) and the one within
-// hotzone.RearmDistance of it (see hotzone.Near), or None for both - also
+// zonesAt returns the enabled hot zones at (x, y) as hotzone.Hit,
+// hotzone.Hold and hotzone.Near see them, or None for all three - also
 // while the hot corners are off, or a mouse button is held, so dragging a
 // window or a selection to the screen edge never opens Task View.
-func (h *Hook) zonesAt(x, y int32) (hit, near hotzone.Zone) {
+func (h *Hook) zonesAt(x, y int32) (hit, hold, near hotzone.Zone) {
 	zones := h.settings.Zones()
 	if zones == hotzone.None || !h.settings.Enabled() || buttonHeld() {
-		return hotzone.None, hotzone.None
+		return hotzone.None, hotzone.None, hotzone.None
 	}
 	pt := packPoint(x, y)
 	mon, _, _ := procMonitorFromPoint.Call(pt, monitorDefaultToNearest)
 	if mon == 0 {
-		return hotzone.None, hotzone.None
+		return hotzone.None, hotzone.None, hotzone.None
 	}
 	mi := monitorInfo{cbSize: uint32(unsafe.Sizeof(monitorInfo{}))}
 	if r, _, _ := procGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&mi))); r == 0 {
-		return hotzone.None, hotzone.None
+		return hotzone.None, hotzone.None, hotzone.None
 	}
 	m := hotzone.Rect(mi.rcMonitor)
 	// Most moves are nowhere near an edge; only look for neighbouring
 	// monitors when the pointer is close to one.
 	const d = hotzone.RearmDistance + hotzone.CornerSize
 	if x > m.Left+d && x < m.Right-1-d && y > m.Top+d && y < m.Bottom-1-d {
-		return hotzone.None, hotzone.None
+		return hotzone.None, hotzone.None, hotzone.None
 	}
 	open := hotzone.Open{
 		Left:   !monitorAt(m.Left-1, y),
@@ -189,7 +194,7 @@ func (h *Hook) zonesAt(x, y int32) (hit, near hotzone.Zone) {
 		Top:    !monitorAt(x, m.Top-1),
 		Bottom: !monitorAt(x, m.Bottom),
 	}
-	return hotzone.Hit(x, y, m, open, zones), hotzone.Near(x, y, m, open, zones)
+	return hotzone.Hit(x, y, m, open, zones), hotzone.Hold(x, y, m, open, zones), hotzone.Near(x, y, m, open, zones)
 }
 
 // monitorAt reports whether any monitor covers (x, y).
@@ -236,8 +241,9 @@ func (h *Hook) stopTimer() {
 func (h *Hook) timerProc(hwnd, msg, id, tick uintptr) uintptr {
 	h.stopTimer()
 	// Settings may have changed, or a button been pressed, since the
-	// timer was armed.
-	if h.settings.Enabled() && !buttonHeld() && h.tracker.Elapsed() {
+	// timer was armed; either way this visit is over.
+	if h.tracker.Elapsed() && h.settings.Enabled() && !buttonHeld() {
+		h.logf("Opening Task View after %v", time.Since(h.armedAt).Round(time.Millisecond))
 		if err := openTaskView(); err != nil {
 			h.logf("WARNING opening Task View: %v", err)
 		}

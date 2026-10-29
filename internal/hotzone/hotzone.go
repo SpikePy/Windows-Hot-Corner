@@ -98,6 +98,11 @@ type Open struct{ Left, Top, Right, Bottom bool }
 // landing on its exact pixel.
 const CornerSize = 8
 
+// HoldDistance is how far, in pixels, the pointer may drift off a zone
+// while its delay runs. A hand resting on the mouse nudges it back a pixel
+// or two now and then; that mustn't cancel and restart the delay.
+const HoldDistance = 8
+
 // RearmDistance is how far, in pixels, the pointer has to get from the
 // zone that opened Task View before it can trigger again. Without it, the
 // pointer wobbling back onto the edge as you start moving away would press
@@ -109,6 +114,12 @@ const RearmDistance = 50
 // counts for the edges it lies on.
 func Hit(x, y int32, m Rect, open Open, enabled Zone) Zone {
 	return within(x, y, m, open, enabled, 0)
+}
+
+// Hold is Hit with every zone grown inwards by HoldDistance: the area the
+// pointer has to stay in while a zone's delay runs.
+func Hold(x, y int32, m Rect, open Open, enabled Zone) Zone {
+	return within(x, y, m, open, enabled, HoldDistance)
 }
 
 // Near is Hit with every zone grown inwards by RearmDistance: the area the
@@ -161,50 +172,58 @@ func within(x, y int32, m Rect, open Open, enabled Zone, grow int32) Zone {
 	return None
 }
 
-// Tracker turns the stream of zones the pointer is in into "open Task
-// View now" decisions. Task View opens once the pointer has stayed in a
-// zone for Delay, and only once per visit: after that the pointer has to
-// get RearmDistance away from every zone before it can trigger again, so
-// neither resting in a corner nor wobbling back into it while moving away
-// presses Win+Tab a second time, which would close Task View.
+// Tracker turns the stream of pointer positions into "open Task View now"
+// decisions. A visit starts when the pointer hits a zone and starts the
+// delay; the delay keeps running while the pointer stays within
+// HoldDistance of a zone (sliding from an edge into its corner included),
+// and is cancelled once it drifts further. Task View opens once per
+// visit: after that the pointer has to get RearmDistance away from every
+// zone before it can trigger again, so neither resting in a corner nor
+// wobbling back into it while moving away presses Win+Tab a second time,
+// which would close Task View.
 type Tracker struct {
-	zone  Zone // the zone the pointer is in, None outside
-	fired bool // Task View was opened during this visit
+	state trackerState
 }
 
-// Move records that the pointer is now in zone z (None when it's in no
-// zone) and within RearmDistance of zone near (see Near). arm reports
-// that a new visit started and the caller should (re)start its delay
-// timer; disarm that the pointer left before the timer ran out and the
-// caller should stop it.
-func (t *Tracker) Move(z, near Zone) (arm, disarm bool) {
-	if t.fired {
-		// The visit, and with it the timer, is over; it only ends for
-		// good once the pointer is well clear of every zone.
-		t.zone = z
-		if z == None && near == None {
-			t.fired = false
+type trackerState int
+
+const (
+	idle    trackerState = iota // waiting for the pointer to hit a zone
+	pending                     // in a zone, the delay is running
+	fired                       // Task View opened during this visit
+)
+
+// Move records the zones the pointer is now in: hit, hold and near as
+// Hit, Hold and Near report them (None outside). arm reports that a visit
+// started and the caller should start its delay timer; disarm that the
+// pointer left before the timer ran out and the caller should stop it.
+func (t *Tracker) Move(hit, hold, near Zone) (arm, disarm bool) {
+	switch t.state {
+	case idle:
+		if hit != None {
+			t.state = pending
+			return true, false
 		}
-		return false, false
+	case pending:
+		if hold == None {
+			t.state = idle
+			return false, true
+		}
+	case fired:
+		if near == None {
+			t.state = idle
+		}
 	}
-	if z == t.zone {
-		return false, false
-	}
-	prev := t.zone
-	t.zone = z
-	if z == None {
-		return false, prev != None
-	}
-	return true, false
+	return false, false
 }
 
 // Elapsed is called when the delay timer runs out, and reports whether
 // Task View should open now.
 func (t *Tracker) Elapsed() bool {
-	if t.zone == None || t.fired {
+	if t.state != pending {
 		return false
 	}
-	t.fired = true
+	t.state = fired
 	return true
 }
 

@@ -51,7 +51,7 @@ included - without touching the file:
 | `-hot-zones "top-left,right"` | Use these zones instead of `hot_zones`                  |
 | `-delay-ms 250`             | Use this delay instead of `delay_ms`                      |
 | `-autostart=false`          | Use this instead of `autostart`                           |
-| `-enable-logging`           | Append diagnostics to `HotCorner.log` next to the exe     |
+| `-enable-logging`           | Append diagnostics to `HotCorner.log` next to the exe, including when the pointer hit a zone and how long Task View took to open |
 
 Logging is off by default and is only meant for troubleshooting.
 
@@ -81,8 +81,11 @@ package listens for the `TaskbarCreated` broadcast and adds the icon back.
   monitor lies just beyond each side: only sides with nothing beyond them
   are hot, because that's where the pointer stops.
 - `internal/hotzone` turns that into a zone (`Hit`) and decides when to
-  act (`Tracker`): entering a zone starts a timer for `delay_ms`, leaving
-  first cancels it, and once Task View opened the pointer has to get
+  act (`Tracker`): hitting a zone starts a timer for `delay_ms`. It keeps
+  running while the pointer stays within 8 pixels of a zone, so a hand
+  nudging the mouse back a pixel, or sliding from an edge into its corner,
+  neither cancels nor restarts it; drifting further cancels it. Once Task
+  View opened the pointer has to get
   50 pixels clear of every zone before it can trigger again. So neither
   resting in a corner nor the pointer wobbling back onto the edge as you
   move away presses `Win+Tab` a second time, which would close Task View.
