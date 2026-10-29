@@ -154,7 +154,7 @@ func (h *Hook) proc(nCode, wParam, lParam uintptr) uintptr {
 		switch {
 		case arm:
 			h.armedAt = time.Now()
-			h.logf("Pointer in %v at (%d, %d), opening Task View in %v", hit, ms.X, ms.Y, h.settings.Delay())
+			h.logf("Pointer in %v at (%d, %d), pushed %d px, opening Task View in %v", hit, ms.X, ms.Y, h.tracker.Pushed(), h.settings.Delay())
 			h.startTimer(hotzone.Timer(h.settings.Delay()))
 		case disarm:
 			h.logf("Pointer left at (%d, %d) after %v, cancelled", ms.X, ms.Y, time.Since(h.armedAt).Round(time.Millisecond))

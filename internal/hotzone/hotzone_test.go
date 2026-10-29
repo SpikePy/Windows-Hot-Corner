@@ -203,7 +203,7 @@ func TestTracker(t *testing.T) {
 			{elapsed: true, fire: false},
 		}},
 		{"push needed: touching alone doesn't arm", 20, []step{
-			{hit: TopLeft},
+			{hit: TopLeft, push: 7},
 			{hit: TopLeft, push: 5},
 			{hit: TopLeft, push: 10},
 			{elapsed: true, fire: false},
@@ -211,12 +211,24 @@ func TestTracker(t *testing.T) {
 			{elapsed: true, fire: true},
 		}},
 		{"push needed: pushing in one go", 20, []step{
+			{hit: TopLeft},
 			{hit: TopLeft, push: 25, arm: true},
 			{elapsed: true, fire: true},
 		}},
+		{"push needed: the overshoot of arriving doesn't count", 20, []step{
+			{hit: TopLeft, push: 50},
+			{elapsed: true, fire: false},
+			{hit: TopLeft, push: 19},
+			{hit: TopLeft, push: 1, arm: true},
+		}},
+		{"no push needed: arriving arms at once", 0, []step{
+			{hit: TopLeft, push: 50, arm: true},
+		}},
 		{"push needed: drifting away resets the push", 20, []step{
+			{hit: TopLeft},
 			{hit: TopLeft, push: 15},
 			{near: TopLeft},
+			{hit: TopLeft, push: 10}, // arriving again: doesn't count
 			{hit: TopLeft, push: 10},
 			{elapsed: true, fire: false},
 			{hit: TopLeft, push: 10, arm: true},

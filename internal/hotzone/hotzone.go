@@ -211,7 +211,8 @@ func within(x, y int32, m Rect, open Open, enabled Zone, grow int32) Zone {
 // Tracker turns the stream of pointer positions into "open Task View now"
 // decisions. A visit starts when the pointer hits a zone. If Push is set,
 // the pointer then has to be pushed that many pixels further against the
-// screen edge before the delay starts. The delay keeps running while the
+// screen edge before the delay starts; the move that brings it into the
+// zone doesn't count towards that. The delay keeps running while the
 // pointer stays within HoldDistance of a zone (sliding from an edge into
 // its corner included), and is cancelled once it drifts further. Task
 // View opens once per visit: after that the pointer has to get
@@ -247,8 +248,12 @@ func (t *Tracker) Move(hit, hold, near Zone, push int32) (arm, disarm bool) {
 		if hit == None {
 			return false, false
 		}
+		// The move that arrives carries the rest of its momentum past
+		// the edge - a fast flick into a corner can overshoot by dozens
+		// of pixels in one go. Only pushing once the pointer is there
+		// counts.
 		t.state, t.pushed = pushing, 0
-		return t.addPush(push), false
+		return t.addPush(0), false
 	case pushing:
 		if hold == None {
 			t.state = idle
@@ -267,6 +272,10 @@ func (t *Tracker) Move(hit, hold, near Zone, push int32) (arm, disarm bool) {
 	}
 	return false, false
 }
+
+// Pushed returns how many pixels the pointer has been pushed past the
+// edge during the current visit, for logging.
+func (t *Tracker) Pushed() int32 { return t.pushed }
 
 // addPush counts push towards Push, and moves on to pending (reporting
 // true, to arm the timer) once there's enough.
