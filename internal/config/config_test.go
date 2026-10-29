@@ -34,7 +34,7 @@ func TestLoadCreatesDefaultFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default config.yaml was not created: %v", err)
 	}
-	for _, want := range []string{"enabled: true", "hot_zones: top-left", "delay_ms: 100", "autostart: true"} {
+	for _, want := range []string{"enabled: true", "hot_zones: top-left", "delay_ms: 100", "push_px: 0", "autostart: true"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("created config.yaml is missing %q:\n%s", want, data)
 		}
@@ -70,6 +70,8 @@ func TestLoad(t *testing.T) {
 		{"hot zones with a comment", "hot_zones: left # for now\n", with(func(c *Config) { c.HotZones = hotzone.Left })},
 		{"delay", "delay_ms: 250\n", with(func(c *Config) { c.Delay = 250 * time.Millisecond })},
 		{"delay zero", "delay_ms: 0\n", with(func(c *Config) { c.Delay = 0 })},
+		{"push", "push_px: 30\n", with(func(c *Config) { c.Push = 30 })},
+		{"too much push keeps the default", "push_px: 5000\n", defaults()},
 		{"comments and blank lines only", "# nothing here\n\n", defaults()},
 		{"unknown keys are ignored", "shortcut: ctrl+alt\nenabled: false\n", with(func(c *Config) { c.Enabled = false })},
 		{"unreadable value keeps the default", "enabled: maybe\nautostart: 1\nhot_zones: middle\ndelay_ms: soon\n", defaults()},
@@ -95,6 +97,27 @@ func TestLoad(t *testing.T) {
 				t.Errorf("Load = %+v, want %+v", cfg, tt.want)
 			}
 		})
+	}
+}
+
+func TestParsePush(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    int32
+		wantErr bool
+	}{
+		{"0", 0, false},
+		{"40", 40, false},
+		{"1000", MaxPush, false},
+		{"1001", 0, true},
+		{"-1", 0, true},
+		{"lots", 0, true},
+	}
+	for _, tt := range tests {
+		got, err := ParsePush(tt.in)
+		if (err != nil) != tt.wantErr || got != tt.want {
+			t.Errorf("ParsePush(%q) = %v, %v; want %v, error %t", tt.in, got, err, tt.want, tt.wantErr)
+		}
 	}
 }
 

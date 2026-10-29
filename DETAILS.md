@@ -15,6 +15,7 @@ application Windows associates with `.yaml`.
 | `enabled`   | `true`     | Whether the hot corners are active, same as the tray toggle    |
 | `hot_zones` | `top-left` | Comma-separated corners and edges that open Task View, or `none` |
 | `delay_ms`  | `100`      | Milliseconds the pointer has to rest in a zone first, 0-5000   |
+| `push_px`   | `0`        | Pixels the mouse has to be pushed further against the edge before the delay starts, 0-1000 |
 | `autostart` | `true`     | Whether the app starts when you sign in (see below)            |
 
 `hot_zones` takes any of `top-left`, `top-right`, `bottom-left`,
@@ -24,6 +25,13 @@ case-insensitive and `_` works in place of `-`. A corner counts within
 8 pixels of it along either edge, so you don't need to hit its exact
 pixel. Corners win over edges; with an edge enabled but not its corner,
 the corner's area counts as part of the edge.
+
+`push_px` asks for intent: the pointer stops at the screen edge, but the
+mouse hook still sees how far the mouse tried to move past it, and that
+movement is added up while the pointer stays in the zone. Only once it
+reaches `push_px` does the `delay_ms` countdown start. Mouse acceleration
+applies, so a quick shove counts for more than a slow one. Drifting off
+the zone starts the count over.
 
 While `autostart` is `true`, the app makes sure the Startup folder holds
 exactly one `HotCorner.lnk`, pointing at
@@ -50,6 +58,7 @@ included - without touching the file:
 | `-enabled=false`            | Start with the hot corners turned off                     |
 | `-hot-zones "top-left,right"` | Use these zones instead of `hot_zones`                  |
 | `-delay-ms 250`             | Use this delay instead of `delay_ms`                      |
+| `-push-px 40`               | Use this push instead of `push_px`                        |
 | `-autostart=false`          | Use this instead of `autostart`                           |
 | `-enable-logging`           | Append diagnostics to `HotCorner.log` next to the exe, including when the pointer hit a zone and how long Task View took to open |
 
@@ -80,6 +89,10 @@ package listens for the `TaskbarCreated` broadcast and adds the icon back.
   edge and end there. On an edge pixel it also checks whether another
   monitor lies just beyond each side: only sides with nothing beyond them
   are hot, because that's where the pointer stops.
+- The hook sees the pointer where the mouse pushed it, before Windows
+  stops it at the screen edge, so pushing into a corner reports points
+  like (-3, 0). `hotzone.Clamp` moves those back onto the screen (they're
+  still in the corner) and reports the overshoot, which `push_px` adds up.
 - `internal/hotzone` turns that into a zone (`Hit`) and decides when to
   act (`Tracker`): hitting a zone starts a timer for `delay_ms`. It keeps
   running while the pointer stays within 8 pixels of a zone, so a hand

@@ -109,6 +109,42 @@ const HoldDistance = 8
 // Win+Tab a second time - and close Task View again.
 const RearmDistance = 50
 
+// Clamp moves (x, y) onto monitor m and reports how many pixels past its
+// outer edges (the open sides) it was. The mouse hook sees the pointer
+// where the mouse pushed it, before Windows stops it at the screen edge,
+// so pushing into a corner reports points like (-3, 0): those are still
+// in the corner, and the overshoot is how hard the pointer is being
+// pushed. Past a side shared with another monitor nothing counts, since
+// the pointer moves on to that monitor.
+func Clamp(x, y int32, m Rect, open Open) (cx, cy, push int32) {
+	cx, cy = x, y
+	if x < m.Left {
+		cx = m.Left
+		if open.Left {
+			push += m.Left - x
+		}
+	}
+	if x > m.Right-1 {
+		cx = m.Right - 1
+		if open.Right {
+			push += x - (m.Right - 1)
+		}
+	}
+	if y < m.Top {
+		cy = m.Top
+		if open.Top {
+			push += m.Top - y
+		}
+	}
+	if y > m.Bottom-1 {
+		cy = m.Bottom - 1
+		if open.Bottom {
+			push += y - (m.Bottom - 1)
+		}
+	}
+	return cx, cy, push
+}
+
 // Hit returns the zone of enabled the point (x, y) on monitor m is in, or
 // None. Corners win over edges; with a corner not enabled, its area still
 // counts for the edges it lies on.
@@ -173,37 +209,52 @@ func within(x, y int32, m Rect, open Open, enabled Zone, grow int32) Zone {
 }
 
 // Tracker turns the stream of pointer positions into "open Task View now"
-// decisions. A visit starts when the pointer hits a zone and starts the
-// delay; the delay keeps running while the pointer stays within
-// HoldDistance of a zone (sliding from an edge into its corner included),
-// and is cancelled once it drifts further. Task View opens once per
-// visit: after that the pointer has to get RearmDistance away from every
-// zone before it can trigger again, so neither resting in a corner nor
-// wobbling back into it while moving away presses Win+Tab a second time,
-// which would close Task View.
+// decisions. A visit starts when the pointer hits a zone. If Push is set,
+// the pointer then has to be pushed that many pixels further against the
+// screen edge before the delay starts. The delay keeps running while the
+// pointer stays within HoldDistance of a zone (sliding from an edge into
+// its corner included), and is cancelled once it drifts further. Task
+// View opens once per visit: after that the pointer has to get
+// RearmDistance away from every zone before it can trigger again, so
+// neither resting in a corner nor wobbling back into it while moving away
+// presses Win+Tab a second time, which would close Task View.
 type Tracker struct {
-	state trackerState
+	// Push is how many pixels the pointer has to be pushed past the edge
+	// before the delay starts; 0 starts it on the first touch.
+	Push int32
+
+	state  trackerState
+	pushed int32 // pixels pushed so far in this visit
 }
 
 type trackerState int
 
 const (
 	idle    trackerState = iota // waiting for the pointer to hit a zone
-	pending                     // in a zone, the delay is running
+	pushing                     // in a zone, waiting for enough push
+	pending                     // pushed enough, the delay is running
 	fired                       // Task View opened during this visit
 )
 
-// Move records the zones the pointer is now in: hit, hold and near as
-// Hit, Hold and Near report them (None outside). arm reports that a visit
-// started and the caller should start its delay timer; disarm that the
-// pointer left before the timer ran out and the caller should stop it.
-func (t *Tracker) Move(hit, hold, near Zone) (arm, disarm bool) {
+// Move records the zones the pointer is now in - hit, hold and near as
+// Hit, Hold and Near report them (None outside) - and push, how far past
+// the screen edge this move went (see Clamp). arm reports that the caller
+// should start its delay timer; disarm that the pointer left before the
+// timer ran out and the caller should stop it.
+func (t *Tracker) Move(hit, hold, near Zone, push int32) (arm, disarm bool) {
 	switch t.state {
 	case idle:
-		if hit != None {
-			t.state = pending
-			return true, false
+		if hit == None {
+			return false, false
 		}
+		t.state, t.pushed = pushing, 0
+		return t.addPush(push), false
+	case pushing:
+		if hold == None {
+			t.state = idle
+			return false, false
+		}
+		return t.addPush(push), false
 	case pending:
 		if hold == None {
 			t.state = idle
@@ -215,6 +266,17 @@ func (t *Tracker) Move(hit, hold, near Zone) (arm, disarm bool) {
 		}
 	}
 	return false, false
+}
+
+// addPush counts push towards Push, and moves on to pending (reporting
+// true, to arm the timer) once there's enough.
+func (t *Tracker) addPush(push int32) bool {
+	t.pushed += push
+	if t.pushed < t.Push {
+		return false
+	}
+	t.state = pending
+	return true
 }
 
 // Elapsed is called when the delay timer runs out, and reports whether

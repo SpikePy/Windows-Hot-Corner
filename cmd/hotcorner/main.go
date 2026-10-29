@@ -68,7 +68,7 @@ const (
 // overrides records which settings were given on the command line: they
 // win over config.yaml for the whole run, reloads included.
 type overrides struct {
-	zones, delay, autostart bool
+	zones, delay, push, autostart bool
 }
 
 func main() {
@@ -83,6 +83,7 @@ func main() {
 	enabled := flag.Bool("enabled", cfg.Enabled, "whether the hot corners are active on launch (overrides config.yaml)")
 	zonesFlag := flag.String("hot-zones", cfg.HotZones.String(), "corners/edges that open Task View, e.g. \"top-left, right\" (overrides config.yaml)")
 	delayFlag := flag.Int("delay-ms", int(cfg.Delay.Milliseconds()), "milliseconds the pointer has to rest in a hot zone (overrides config.yaml)")
+	pushFlag := flag.Int("push-px", int(cfg.Push), "pixels the mouse has to be pushed past the screen edge in a hot zone (overrides config.yaml)")
 	autostart := flag.Bool("autostart", cfg.Autostart, "start with Windows (overrides config.yaml)")
 	enableLogging := flag.Bool("enable-logging", false, "write diagnostics to "+logFileName+" next to the exe")
 	flag.Parse()
@@ -94,6 +95,8 @@ func main() {
 			set.zones = true
 		case "delay-ms":
 			set.delay = true
+		case "push-px":
+			set.push = true
 		case "autostart":
 			set.autostart = true
 		}
@@ -112,6 +115,12 @@ func main() {
 	delay, err := config.ParseDelay(fmt.Sprint(*delayFlag))
 	if err != nil {
 		win32.ErrorBox(appName, fmt.Sprintf("-delay-ms: %v", err))
+		return
+	}
+
+	push, err := config.ParsePush(fmt.Sprint(*pushFlag))
+	if err != nil {
+		win32.ErrorBox(appName, fmt.Sprintf("-push-px: %v", err))
 		return
 	}
 
@@ -137,6 +146,7 @@ func main() {
 	a.enabled.Store(*enabled)
 	a.zones.Store(uint32(zones))
 	a.delay.Store(int64(delay))
+	a.push.Store(push)
 	a.applyAutostart(*autostart)
 
 	if err := a.run(); err != nil {
@@ -161,6 +171,7 @@ type app struct {
 	enabled atomic.Bool
 	zones   atomic.Uint32 // a hotzone.Zone
 	delay   atomic.Int64  // a time.Duration
+	push    atomic.Int32
 
 	iconEnabled  uintptr
 	iconDisabled uintptr
@@ -191,6 +202,7 @@ func (a *app) run() error {
 		Enabled: a.enabled.Load,
 		Zones:   func() hotzone.Zone { return hotzone.Zone(a.zones.Load()) },
 		Delay:   func() time.Duration { return time.Duration(a.delay.Load()) },
+		Push:    a.push.Load,
 	}, a.logf)
 	if err := h.Install(); err != nil {
 		return fmt.Errorf("installing the mouse hook: %w", err)
@@ -203,8 +215,8 @@ func (a *app) run() error {
 		a.logf("WARNING watching config.yaml: %v", err)
 	}
 
-	a.logf("Running %s (enabled=%t, hot_zones=%v, delay=%v)", version, a.enabled.Load(),
-		hotzone.Zone(a.zones.Load()), time.Duration(a.delay.Load()))
+	a.logf("Running %s (enabled=%t, hot_zones=%v, delay=%v, push=%dpx)", version, a.enabled.Load(),
+		hotzone.Zone(a.zones.Load()), time.Duration(a.delay.Load()), a.push.Load())
 	win32.RunMessageLoop()
 	return nil
 }
@@ -254,8 +266,11 @@ func (a *app) configChanged(cfg config.Config) {
 	if !a.overrides.delay {
 		a.delay.Store(int64(cfg.Delay))
 	}
-	a.logf("config.yaml changed: enabled=%t, hot_zones=%v, delay=%v", cfg.Enabled,
-		hotzone.Zone(a.zones.Load()), time.Duration(a.delay.Load()))
+	if !a.overrides.push {
+		a.push.Store(cfg.Push)
+	}
+	a.logf("config.yaml changed: enabled=%t, hot_zones=%v, delay=%v, push=%dpx", cfg.Enabled,
+		hotzone.Zone(a.zones.Load()), time.Duration(a.delay.Load()), a.push.Load())
 	if cfg.Enabled == a.enabled.Load() {
 		return
 	}

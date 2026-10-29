@@ -130,6 +130,7 @@ type step struct {
 	// unset hold is taken to be hit, an unset near to be hold, since each
 	// area contains the one before.
 	hit, hold, near Zone
+	push            int32
 	elapsed         bool
 	// What the call should return: arm/disarm for a move, fire for an
 	// elapsed timer.
@@ -139,31 +140,32 @@ type step struct {
 func TestTracker(t *testing.T) {
 	tests := []struct {
 		name  string
+		push  int32
 		steps []step
 	}{
-		{"enter, wait, fire once", []step{
+		{"enter, wait, fire once", 0, []step{
 			{hit: TopLeft, arm: true},
 			{elapsed: true, fire: true},
 			{elapsed: true, fire: false},
 		}},
-		{"moving within the zone doesn't re-arm", []step{
+		{"moving within the zone doesn't re-arm", 0, []step{
 			{hit: TopLeft, arm: true},
 			{hit: TopLeft},
 			{elapsed: true, fire: true},
 		}},
-		{"drifting a few pixels off the zone keeps the delay running", []step{
+		{"drifting a few pixels off the zone keeps the delay running", 0, []step{
 			{hit: TopLeft, arm: true},
 			{hold: TopLeft},
 			{hit: TopLeft},
 			{hold: TopLeft},
 			{elapsed: true, fire: true},
 		}},
-		{"leaving before the delay cancels", []step{
+		{"leaving before the delay cancels", 0, []step{
 			{hit: TopLeft, arm: true},
 			{near: TopLeft, disarm: true},
 			{elapsed: true, fire: false},
 		}},
-		{"wobbling back into the zone while moving away doesn't fire again", []step{
+		{"wobbling back into the zone while moving away doesn't fire again", 0, []step{
 			{hit: TopLeft, arm: true},
 			{elapsed: true, fire: true},
 			{near: TopLeft},
@@ -174,32 +176,59 @@ func TestTracker(t *testing.T) {
 			{hit: TopLeft, arm: true},
 			{elapsed: true, fire: true},
 		}},
-		{"leaving after firing re-arms for the next visit", []step{
+		{"leaving after firing re-arms for the next visit", 0, []step{
 			{hit: TopLeft, arm: true},
 			{elapsed: true, fire: true},
 			{},
 			{hit: TopLeft, arm: true},
 			{elapsed: true, fire: true},
 		}},
-		{"sliding into another zone after firing stays one visit", []step{
+		{"sliding into another zone after firing stays one visit", 0, []step{
 			{hit: Top, arm: true},
 			{elapsed: true, fire: true},
 			{hit: TopLeft},
 			{elapsed: true, fire: false},
 		}},
-		{"sliding into another zone before firing doesn't restart the delay", []step{
+		{"sliding into another zone before firing doesn't restart the delay", 0, []step{
 			{hit: Top, arm: true},
 			{hit: TopLeft},
 			{elapsed: true, fire: true},
 		}},
-		{"moving outside any zone does nothing", []step{
+		{"pushing into the corner keeps it open, not toggling", 0, []step{
+			{hit: TopLeft, push: 3, arm: true},
+			{hit: TopLeft, push: 2},
+			{elapsed: true, fire: true},
+			{hit: TopLeft, push: 3},
+			{hit: TopLeft},
+			{elapsed: true, fire: false},
+		}},
+		{"push needed: touching alone doesn't arm", 20, []step{
+			{hit: TopLeft},
+			{hit: TopLeft, push: 5},
+			{hit: TopLeft, push: 10},
+			{elapsed: true, fire: false},
+			{hit: TopLeft, push: 5, arm: true},
+			{elapsed: true, fire: true},
+		}},
+		{"push needed: pushing in one go", 20, []step{
+			{hit: TopLeft, push: 25, arm: true},
+			{elapsed: true, fire: true},
+		}},
+		{"push needed: drifting away resets the push", 20, []step{
+			{hit: TopLeft, push: 15},
+			{near: TopLeft},
+			{hit: TopLeft, push: 10},
+			{elapsed: true, fire: false},
+			{hit: TopLeft, push: 10, arm: true},
+		}},
+		{"moving outside any zone does nothing", 0, []step{
 			{},
 			{elapsed: true, fire: false},
 		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var tr Tracker
+			tr := Tracker{Push: tt.push}
 			for i, s := range tt.steps {
 				if s.elapsed {
 					if got := tr.Elapsed(); got != s.fire {
@@ -214,10 +243,36 @@ func TestTracker(t *testing.T) {
 				if near == None {
 					near = hold
 				}
-				arm, disarm := tr.Move(s.hit, hold, near)
+				arm, disarm := tr.Move(s.hit, hold, near, s.push)
 				if arm != s.arm || disarm != s.disarm {
-					t.Fatalf("step %d: Move(%v, %v, %v) = %t, %t; want %t, %t", i, s.hit, hold, near, arm, disarm, s.arm, s.disarm)
+					t.Fatalf("step %d: Move(%v, %v, %v, %d) = %t, %t; want %t, %t", i, s.hit, hold, near, s.push, arm, disarm, s.arm, s.disarm)
 				}
+			}
+		})
+	}
+}
+
+func TestClamp(t *testing.T) {
+	m := Rect{0, 0, 1920, 1080}
+	all := Open{true, true, true, true}
+	tests := []struct {
+		name               string
+		x, y               int32
+		open               Open
+		wantX, wantY, push int32
+	}{
+		{"inside", 500, 500, all, 500, 500, 0},
+		{"on the edge", 0, 500, all, 0, 500, 0},
+		{"past the left edge", -3, 500, all, 0, 500, 3},
+		{"past the top-left corner", -2, -4, all, 0, 0, 6},
+		{"past the bottom-right corner", 1925, 1081, all, 1919, 1079, 8},
+		{"past a shared edge", 1925, 500, Open{true, true, false, true}, 1919, 500, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			x, y, push := Clamp(tt.x, tt.y, m, tt.open)
+			if x != tt.wantX || y != tt.wantY || push != tt.push {
+				t.Errorf("Clamp(%d, %d) = %d, %d, %d; want %d, %d, %d", tt.x, tt.y, x, y, push, tt.wantX, tt.wantY, tt.push)
 			}
 		})
 	}

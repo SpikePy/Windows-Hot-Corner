@@ -30,11 +30,15 @@ const (
 	DefaultAutostart = true
 	DefaultHotZones  = hotzone.TopLeft
 	DefaultDelay     = 100 * time.Millisecond
+	DefaultPush      = 0
 )
 
 // MaxDelay caps delay_ms: a hot corner that needs the pointer to rest for
 // longer than this is a typo, not a setting.
 const MaxDelay = 5 * time.Second
+
+// MaxPush caps push_px, for the same reason.
+const MaxPush = 1000
 
 const (
 	dirName  = "HotCorner"
@@ -64,6 +68,13 @@ hot_zones: %s
 # Override with -delay-ms.
 delay_ms: %d
 
+# push_px: how many pixels further you have to push the mouse against the
+# screen edge, once the pointer is in a hot zone, before the delay starts
+# (0-1000). The pointer itself stops at the edge; this counts the mouse
+# movement past it, so a hot corner only opens when you mean it. 0 = just
+# touching the zone is enough. Override with -push-px.
+push_px: %d
+
 # autostart: start the app when you sign in to Windows. While this is true
 # the app keeps a shortcut to itself in your Startup folder; set it to
 # false and that shortcut is removed. Override with -autostart.
@@ -76,16 +87,17 @@ type Config struct {
 	Enabled   bool
 	HotZones  hotzone.Zone
 	Delay     time.Duration
+	Push      int32
 	Autostart bool
 }
 
 func defaults() Config {
-	return Config{Enabled: DefaultEnabled, HotZones: DefaultHotZones, Delay: DefaultDelay, Autostart: DefaultAutostart}
+	return Config{Enabled: DefaultEnabled, HotZones: DefaultHotZones, Delay: DefaultDelay, Push: DefaultPush, Autostart: DefaultAutostart}
 }
 
 // defaultFile is the text of a freshly created config.yaml.
 func defaultFile() []byte {
-	return []byte(fmt.Sprintf(template, DefaultEnabled, DefaultHotZones, DefaultDelay.Milliseconds(), DefaultAutostart))
+	return []byte(fmt.Sprintf(template, DefaultEnabled, DefaultHotZones, DefaultDelay.Milliseconds(), DefaultPush, DefaultAutostart))
 }
 
 // ParseDelay reads a delay_ms value, rejecting anything outside 0 to
@@ -127,6 +139,19 @@ func Load() (Config, error) {
 	return parse(string(data)), nil
 }
 
+// ParsePush reads a push_px value, rejecting anything outside 0 to
+// MaxPush.
+func ParsePush(value string) (int32, error) {
+	px, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("push_px %q is not a whole number", value)
+	}
+	if px < 0 || px > MaxPush {
+		return 0, fmt.Errorf("push_px %d is outside 0-%d", px, MaxPush)
+	}
+	return int32(px), nil
+}
+
 // parse reads the settings it recognises out of a config file's text,
 // leaving anything it doesn't understand at its default.
 func parse(text string) Config {
@@ -148,6 +173,10 @@ func parse(text string) Config {
 		case "delay_ms":
 			if d, err := ParseDelay(value); err == nil {
 				cfg.Delay = d
+			}
+		case "push_px":
+			if p, err := ParsePush(value); err == nil {
+				cfg.Push = p
 			}
 		}
 	}

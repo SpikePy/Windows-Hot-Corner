@@ -48,6 +48,7 @@ a comment above each setting):
 enabled: true          # same as the tray toggle
 hot_zones: top-left    # corners/edges that open Task View, comma-separated, or none
 delay_ms: 100          # how long the pointer has to rest there first (0-5000)
+push_px: 0             # push the mouse this many pixels further against the edge first (0-1000)
 autostart: true        # start when you sign in
 ```
 
