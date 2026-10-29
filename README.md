@@ -51,7 +51,7 @@ delay_ms: 100          # how long the pointer has to rest there first (0-5000)
 autostart: true        # start when you sign in
 ```
 
-Edits are picked up within a couple of seconds, no restart needed.
+Edits apply as soon as you save the file, no restart needed.
 
 ## More
 

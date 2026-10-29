@@ -43,8 +43,8 @@ const (
 
 const template = `# HotCorner configuration
 #
-# Edit and save this file to change how the app behaves. Changes are
-# picked up automatically within a couple of seconds -- no restart needed.
+# Edit and save this file to change how the app behaves. Changes apply as
+# soon as you save -- no restart needed.
 
 # enabled: turn the hot corners on or off without uninstalling the app.
 # You can also toggle this from the tray icon, and override it for a
@@ -251,40 +251,4 @@ func setIn(data []byte, key string, value bool) []byte {
 		out = append(out, '\n')
 	}
 	return append(out, []byte(key+": "+v+"\n")...)
-}
-
-// Watch polls config.yaml and calls onChange whenever its contents change
-// on disk, so an edit made in whatever editor Configure opened takes
-// effect without a restart. It runs until stop is closed, and is meant to
-// be started on its own goroutine.
-func Watch(stop <-chan struct{}, interval time.Duration, onChange func(Config)) {
-	last, _ := modTime()
-	for {
-		select {
-		case <-stop:
-			return
-		case <-time.After(interval):
-		}
-
-		mod, err := modTime()
-		if err != nil || mod.Equal(last) {
-			continue
-		}
-		last = mod
-		if cfg, err := Load(); err == nil {
-			onChange(cfg)
-		}
-	}
-}
-
-func modTime() (time.Time, error) {
-	path, err := Path()
-	if err != nil {
-		return time.Time{}, err
-	}
-	fi, err := os.Stat(path)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return fi.ModTime(), nil
 }

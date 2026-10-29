@@ -55,10 +55,6 @@ const (
 	// exeName is the installed exe, next to config.yaml - what the Startup
 	// shortcut points at.
 	exeName = "HotCorner.exe"
-
-	// configPollInterval is how often the config file is checked for
-	// outside edits, e.g. made in the editor Configure opened.
-	configPollInterval = 2 * time.Second
 )
 
 // Tray menu item IDs. 0 is reserved for "nothing selected".
@@ -201,9 +197,11 @@ func (a *app) run() error {
 	}
 	defer h.Uninstall()
 
-	stopWatching := make(chan struct{})
-	defer close(stopWatching)
-	go config.Watch(stopWatching, configPollInterval, a.configChanged)
+	// Without the watcher the hot corners still work; config edits just
+	// wait for the next start.
+	if err := config.Watch(a.configChanged); err != nil {
+		a.logf("WARNING watching config.yaml: %v", err)
+	}
 
 	a.logf("Running %s (enabled=%t, hot_zones=%v, delay=%v)", version, a.enabled.Load(),
 		hotzone.Zone(a.zones.Load()), time.Duration(a.delay.Load()))

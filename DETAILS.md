@@ -36,7 +36,8 @@ installed exe doesn't exist.
 Unknown keys are ignored, so a file written by another version still
 loads, and an unreadable value (an unknown zone name, a delay out of
 range) falls back to that setting's default rather than stopping the app.
-Edits are picked up within a couple of seconds. Toggling from the tray
+Edits apply as soon as the file is saved: the app sleeps on a Windows
+change notification for its folder, no polling. Toggling from the tray
 writes `enabled` back, preserving your comments.
 
 ### Command-line flags
