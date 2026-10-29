@@ -71,8 +71,9 @@ delay_ms: %d
 # push_px: how many pixels further you have to push the mouse against the
 # screen edge, once the pointer is in a hot zone, before the delay starts
 # (0-1000). The pointer itself stops at the edge; this counts the mouse
-# movement past it, so a hot corner only opens when you mean it. 0 = just
-# touching the zone is enough. Override with -push-px.
+# movement past it, so a hot corner only opens when you mean it. The first
+# 200 ms after the pointer arrives don't count, so flicking the mouse into
+# a corner isn't enough. 0 = just touching the zone is enough. Override with -push-px.
 push_px: %d
 
 # autostart: start the app when you sign in to Windows. While this is true

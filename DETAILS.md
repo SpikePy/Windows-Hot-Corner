@@ -29,7 +29,12 @@ the corner's area counts as part of the edge.
 `push_px` asks for intent: the pointer stops at the screen edge, but the
 mouse hook still sees how far the mouse tried to move past it, and that
 movement is added up while the pointer stays in the zone. Only once it
-reaches `push_px` does the `delay_ms` countdown start. Mouse acceleration
+reaches `push_px` does the `delay_ms` countdown start. Pushing during the
+first 200 ms after the pointer arrives doesn't count: a quick flick into a
+corner keeps reporting movement past the edge until the hand stops
+(measured: over 1200 px from one flick), which would satisfy any
+`push_px` without meaning to. So hold the pointer against the corner
+for a moment, then push. Mouse acceleration
 applies, so a quick shove counts for more than a slow one. Leaving
 the zone starts the count over.
 

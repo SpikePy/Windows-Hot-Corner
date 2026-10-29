@@ -200,8 +200,8 @@ func within(x, y int32, m Rect, open Open, enabled Zone, grow int32) Zone {
 // Tracker turns the stream of pointer positions into "open Task View now"
 // decisions. A visit starts when the pointer hits a zone. If Push is set,
 // the pointer then has to be pushed that many pixels further against the
-// screen edge before the delay starts; the move that brings it into the
-// zone doesn't count towards that. The delay only runs while the pointer
+// screen edge before the delay starts; pushing during the first
+// SettleTime after it arrived doesn't count towards that. The delay only runs while the pointer
 // stays in a zone (sliding from an edge into its corner included); leaving
 // by a single pixel cancels it, so Task View opens only after the pointer
 // has really rested there for the whole delay. Task
@@ -214,9 +214,17 @@ type Tracker struct {
 	// before the delay starts; 0 starts it on the first touch.
 	Push int32
 
-	state  trackerState
-	pushed int32 // pixels pushed so far in this visit
+	state   trackerState
+	pushed  int32     // pixels pushed so far in this visit
+	arrived time.Time // when the pointer entered the zone
 }
+
+// SettleTime is how long after the pointer arrives in a zone its push
+// starts counting. A flick into a corner reaches it at speed: the mouse
+// keeps reporting movement past the edge for dozens of events at 500-1000
+// a second until the hand stops, enough on its own for any push_px. Only
+// pushing on after that shows intent.
+const SettleTime = 200 * time.Millisecond
 
 type trackerState int
 
@@ -229,27 +237,23 @@ const (
 
 // Move records the zones the pointer is now in - hit and near as Hit
 // and Near report them (None outside) - and push, how far past
-// the screen edge this move went (see Clamp). arm reports that the caller
+// the screen edge this move went (see Clamp), at time now. arm reports that the caller
 // should start its delay timer; disarm that the pointer left before the
 // timer ran out and the caller should stop it.
-func (t *Tracker) Move(hit, near Zone, push int32) (arm, disarm bool) {
+func (t *Tracker) Move(hit, near Zone, push int32, now time.Time) (arm, disarm bool) {
 	switch t.state {
 	case idle:
 		if hit == None {
 			return false, false
 		}
-		// The move that arrives carries the rest of its momentum past
-		// the edge - a fast flick into a corner can overshoot by dozens
-		// of pixels in one go. Only pushing once the pointer is there
-		// counts.
-		t.state, t.pushed = pushing, 0
-		return t.addPush(0), false
+		t.state, t.pushed, t.arrived = pushing, 0, now
+		return t.addPush(push, now), false
 	case pushing:
 		if hit == None {
 			t.state = idle
 			return false, false
 		}
-		return t.addPush(push), false
+		return t.addPush(push, now), false
 	case pending:
 		if hit == None {
 			t.state = idle
@@ -267,10 +271,13 @@ func (t *Tracker) Move(hit, near Zone, push int32) (arm, disarm bool) {
 // edge during the current visit, for logging.
 func (t *Tracker) Pushed() int32 { return t.pushed }
 
-// addPush counts push towards Push, and moves on to pending (reporting
-// true, to arm the timer) once there's enough.
-func (t *Tracker) addPush(push int32) bool {
-	t.pushed += push
+// addPush counts push towards Push once the pointer has settled in the
+// zone, and moves on to pending (reporting true, to arm the timer) once
+// there's enough.
+func (t *Tracker) addPush(push int32, now time.Time) bool {
+	if now.Sub(t.arrived) >= SettleTime {
+		t.pushed += push
+	}
 	if t.pushed < t.Push {
 		return false
 	}

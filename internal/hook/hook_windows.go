@@ -150,7 +150,7 @@ func (h *Hook) proc(nCode, wParam, lParam uintptr) uintptr {
 		ms := (*msllhookstruct)(unsafe.Pointer(lParam))
 		hit, near, push := h.zonesAt(ms.X, ms.Y)
 		h.tracker.Push = h.settings.Push()
-		arm, disarm := h.tracker.Move(hit, near, push)
+		arm, disarm := h.tracker.Move(hit, near, push, time.Now())
 		switch {
 		case arm:
 			h.armedAt = time.Now()

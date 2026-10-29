@@ -130,7 +130,9 @@ type step struct {
 	// near is taken to be hit, since Near's area contains Hit's.
 	hit, near Zone
 	push      int32
-	elapsed   bool
+	// wait advances the clock before the step.
+	wait    time.Duration
+	elapsed bool
 	// What the call should return: arm/disarm for a move, fire for an
 	// elapsed timer.
 	arm, disarm, fire bool
@@ -203,34 +205,38 @@ func TestTracker(t *testing.T) {
 		}},
 		{"push needed: touching alone doesn't arm", 20, []step{
 			{hit: TopLeft, push: 7},
-			{hit: TopLeft, push: 5},
+			{hit: TopLeft, wait: SettleTime},
+			{elapsed: true, fire: false},
+		}},
+		{"push needed: settled pushes add up", 20, []step{
+			{hit: TopLeft},
+			{hit: TopLeft, push: 5, wait: SettleTime},
 			{hit: TopLeft, push: 10},
 			{elapsed: true, fire: false},
 			{hit: TopLeft, push: 5, arm: true},
 			{elapsed: true, fire: true},
 		}},
-		{"push needed: pushing in one go", 20, []step{
-			{hit: TopLeft},
-			{hit: TopLeft, push: 25, arm: true},
-			{elapsed: true, fire: true},
-		}},
-		{"push needed: the overshoot of arriving doesn't count", 20, []step{
-			{hit: TopLeft, push: 50},
+		{"push needed: a flick's momentum doesn't count", 20, []step{
+			{hit: TopLeft, push: 300},
+			{hit: TopLeft, push: 120, wait: 5 * time.Millisecond},
+			{hit: TopLeft, push: 40, wait: 50 * time.Millisecond},
+			{hit: TopLeft, push: 20, wait: 100 * time.Millisecond},
 			{elapsed: true, fire: false},
-			{hit: TopLeft, push: 19},
+			{hit: TopLeft, push: 19, wait: 50 * time.Millisecond},
 			{hit: TopLeft, push: 1, arm: true},
+		}},
+		{"push needed: leaving starts over, settle time included", 20, []step{
+			{hit: TopLeft},
+			{hit: TopLeft, push: 15, wait: SettleTime},
+			{near: TopLeft},
+			{hit: TopLeft, push: 10},
+			{hit: TopLeft, push: 10, wait: SettleTime - time.Millisecond},
+			{elapsed: true, fire: false},
+			{hit: TopLeft, push: 10, wait: time.Millisecond},
+			{hit: TopLeft, push: 10, arm: true},
 		}},
 		{"no push needed: arriving arms at once", 0, []step{
 			{hit: TopLeft, push: 50, arm: true},
-		}},
-		{"push needed: drifting away resets the push", 20, []step{
-			{hit: TopLeft},
-			{hit: TopLeft, push: 15},
-			{near: TopLeft},
-			{hit: TopLeft, push: 10}, // arriving again: doesn't count
-			{hit: TopLeft, push: 10},
-			{elapsed: true, fire: false},
-			{hit: TopLeft, push: 10, arm: true},
 		}},
 		{"moving outside any zone does nothing", 0, []step{
 			{},
@@ -240,7 +246,9 @@ func TestTracker(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tr := Tracker{Push: tt.push}
+			now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			for i, s := range tt.steps {
+				now = now.Add(s.wait)
 				if s.elapsed {
 					if got := tr.Elapsed(); got != s.fire {
 						t.Fatalf("step %d: Elapsed() = %t, want %t", i, got, s.fire)
@@ -251,7 +259,7 @@ func TestTracker(t *testing.T) {
 				if near == None {
 					near = s.hit
 				}
-				arm, disarm := tr.Move(s.hit, near, s.push)
+				arm, disarm := tr.Move(s.hit, near, s.push, now)
 				if arm != s.arm || disarm != s.disarm {
 					t.Fatalf("step %d: Move(%v, %v, %d) = %t, %t; want %t, %t", i, s.hit, near, s.push, arm, disarm, s.arm, s.disarm)
 				}
