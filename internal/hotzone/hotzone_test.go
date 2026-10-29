@@ -84,6 +84,37 @@ func TestHit(t *testing.T) {
 	}
 }
 
+func TestNear(t *testing.T) {
+	m := Rect{0, 0, 1920, 1080}
+	all := Open{true, true, true, true}
+	tests := []struct {
+		name    string
+		x, y    int32
+		enabled Zone
+		want    Zone
+	}{
+		{"on the corner", 0, 0, TopLeft, TopLeft},
+		{"a few pixels out of the corner", 4, 3, TopLeft, TopLeft},
+		{"just within the rearm distance", RearmDistance, RearmDistance, TopLeft, TopLeft},
+		{"beyond the rearm distance along the edge", CornerSize + RearmDistance, 0, TopLeft, None},
+		{"beyond the rearm distance off the edge", 0, CornerSize + RearmDistance, TopLeft, None},
+		{"near an edge", 960, RearmDistance, Top, Top},
+		{"beyond an edge's rearm distance", 960, RearmDistance + 1, Top, None},
+		{"near a shared edge", 1900, 500, Right, None},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			open := all
+			if tt.name == "near a shared edge" {
+				open.Right = false
+			}
+			if got := Near(tt.x, tt.y, m, open, tt.enabled); got != tt.want {
+				t.Errorf("Near(%d, %d) = %v, want %v", tt.x, tt.y, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHitOnASecondMonitor(t *testing.T) {
 	// A monitor left of the primary one has negative coordinates.
 	m := Rect{-1280, -200, 0, 824}
@@ -96,6 +127,7 @@ func TestHitOnASecondMonitor(t *testing.T) {
 // zone, or the delay timer running out (elapsed).
 type step struct {
 	zone    Zone
+	near    Zone // what Near reports; taken to be zone when left unset
 	elapsed bool
 	// What the call should return: arm/disarm for a move, fire for an
 	// elapsed timer.
@@ -121,6 +153,17 @@ func TestTracker(t *testing.T) {
 			{zone: TopLeft, arm: true},
 			{zone: None, disarm: true},
 			{elapsed: true, fire: false},
+		}},
+		{"wobbling back into the zone while moving away doesn't fire again", []step{
+			{zone: TopLeft, arm: true},
+			{elapsed: true, fire: true},
+			{zone: None, near: TopLeft},
+			{zone: TopLeft},
+			{elapsed: true, fire: false},
+			{zone: None, near: TopLeft},
+			{zone: None},
+			{zone: TopLeft, arm: true},
+			{elapsed: true, fire: true},
 		}},
 		{"leaving after firing re-arms for the next visit", []step{
 			{zone: TopLeft, arm: true},
@@ -155,7 +198,11 @@ func TestTracker(t *testing.T) {
 					}
 					continue
 				}
-				arm, disarm := tr.Move(s.zone)
+				near := s.near
+				if near == None {
+					near = s.zone
+				}
+				arm, disarm := tr.Move(s.zone, near)
 				if arm != s.arm || disarm != s.disarm {
 					t.Fatalf("step %d: Move(%v) = %t, %t; want %t, %t", i, s.zone, arm, disarm, s.arm, s.disarm)
 				}

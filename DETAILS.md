@@ -81,9 +81,10 @@ package listens for the `TaskbarCreated` broadcast and adds the icon back.
   are hot, because that's where the pointer stops.
 - `internal/hotzone` turns that into a zone (`Hit`) and decides when to
   act (`Tracker`): entering a zone starts a timer for `delay_ms`, leaving
-  first cancels it, and once Task View opened the pointer has to leave
-  every zone before it can trigger again, so resting in a corner never
-  flickers Task View open and shut.
+  first cancels it, and once Task View opened the pointer has to get
+  50 pixels clear of every zone before it can trigger again. So neither
+  resting in a corner nor the pointer wobbling back onto the edge as you
+  move away presses `Win+Tab` a second time, which would close Task View.
 - When the timer fires, the app presses `Win+Tab` with `SendInput`, which
   opens Task View (or closes it if it's already open). The timer is a
   thread timer dispatched by the app's own message loop, so nothing runs

@@ -146,7 +146,7 @@ func (h *Hook) Uninstall() {
 func (h *Hook) proc(nCode, wParam, lParam uintptr) uintptr {
 	if int32(nCode) == hcAction && wParam == wmMouseMove {
 		ms := (*msllhookstruct)(unsafe.Pointer(lParam))
-		arm, disarm := h.tracker.Move(h.zoneAt(ms.X, ms.Y))
+		arm, disarm := h.tracker.Move(h.zonesAt(ms.X, ms.Y))
 		switch {
 		case arm:
 			h.startTimer(hotzone.Timer(h.settings.Delay()))
@@ -158,28 +158,30 @@ func (h *Hook) proc(nCode, wParam, lParam uintptr) uintptr {
 	return r0
 }
 
-// zoneAt returns the enabled hot zone at (x, y), or None - also while the
-// hot corners are off, or a mouse button is held, so dragging a window or
-// a selection to the screen edge never opens Task View.
-func (h *Hook) zoneAt(x, y int32) hotzone.Zone {
+// zonesAt returns the enabled hot zone at (x, y) and the one within
+// hotzone.RearmDistance of it (see hotzone.Near), or None for both - also
+// while the hot corners are off, or a mouse button is held, so dragging a
+// window or a selection to the screen edge never opens Task View.
+func (h *Hook) zonesAt(x, y int32) (hit, near hotzone.Zone) {
 	zones := h.settings.Zones()
 	if zones == hotzone.None || !h.settings.Enabled() || buttonHeld() {
-		return hotzone.None
+		return hotzone.None, hotzone.None
 	}
 	pt := packPoint(x, y)
 	mon, _, _ := procMonitorFromPoint.Call(pt, monitorDefaultToNearest)
 	if mon == 0 {
-		return hotzone.None
+		return hotzone.None, hotzone.None
 	}
 	mi := monitorInfo{cbSize: uint32(unsafe.Sizeof(monitorInfo{}))}
 	if r, _, _ := procGetMonitorInfoW.Call(mon, uintptr(unsafe.Pointer(&mi))); r == 0 {
-		return hotzone.None
+		return hotzone.None, hotzone.None
 	}
 	m := hotzone.Rect(mi.rcMonitor)
 	// Most moves are nowhere near an edge; only look for neighbouring
-	// monitors when the pointer is on one.
-	if x != m.Left && x != m.Right-1 && y != m.Top && y != m.Bottom-1 {
-		return hotzone.None
+	// monitors when the pointer is close to one.
+	const d = hotzone.RearmDistance + hotzone.CornerSize
+	if x > m.Left+d && x < m.Right-1-d && y > m.Top+d && y < m.Bottom-1-d {
+		return hotzone.None, hotzone.None
 	}
 	open := hotzone.Open{
 		Left:   !monitorAt(m.Left-1, y),
@@ -187,7 +189,7 @@ func (h *Hook) zoneAt(x, y int32) hotzone.Zone {
 		Top:    !monitorAt(x, m.Top-1),
 		Bottom: !monitorAt(x, m.Bottom),
 	}
-	return hotzone.Hit(x, y, m, open, zones)
+	return hotzone.Hit(x, y, m, open, zones), hotzone.Near(x, y, m, open, zones)
 }
 
 // monitorAt reports whether any monitor covers (x, y).

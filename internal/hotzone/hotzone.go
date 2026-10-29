@@ -98,21 +98,39 @@ type Open struct{ Left, Top, Right, Bottom bool }
 // landing on its exact pixel.
 const CornerSize = 8
 
+// RearmDistance is how far, in pixels, the pointer has to get from the
+// zone that opened Task View before it can trigger again. Without it, the
+// pointer wobbling back onto the edge as you start moving away would press
+// Win+Tab a second time - and close Task View again.
+const RearmDistance = 50
+
 // Hit returns the zone of enabled the point (x, y) on monitor m is in, or
 // None. Corners win over edges; with a corner not enabled, its area still
 // counts for the edges it lies on.
 func Hit(x, y int32, m Rect, open Open, enabled Zone) Zone {
+	return within(x, y, m, open, enabled, 0)
+}
+
+// Near is Hit with every zone grown inwards by RearmDistance: the area the
+// pointer has to leave before a zone can trigger again.
+func Near(x, y int32, m Rect, open Open, enabled Zone) Zone {
+	return within(x, y, m, open, enabled, RearmDistance)
+}
+
+// within returns the zone (x, y) is in, counting points up to grow pixels
+// in from an edge as on it.
+func within(x, y int32, m Rect, open Open, enabled Zone, grow int32) Zone {
 	if x < m.Left || x >= m.Right || y < m.Top || y >= m.Bottom {
 		return None
 	}
-	atLeft := open.Left && x == m.Left
-	atRight := open.Right && x == m.Right-1
-	atTop := open.Top && y == m.Top
-	atBottom := open.Bottom && y == m.Bottom-1
-	nearLeft := x < m.Left+CornerSize
-	nearRight := x >= m.Right-CornerSize
-	nearTop := y < m.Top+CornerSize
-	nearBottom := y >= m.Bottom-CornerSize
+	atLeft := open.Left && x <= m.Left+grow
+	atRight := open.Right && x >= m.Right-1-grow
+	atTop := open.Top && y <= m.Top+grow
+	atBottom := open.Bottom && y >= m.Bottom-1-grow
+	nearLeft := x < m.Left+CornerSize+grow
+	nearRight := x >= m.Right-CornerSize-grow
+	nearTop := y < m.Top+CornerSize+grow
+	nearBottom := y >= m.Bottom-CornerSize-grow
 
 	// A corner needs both its sides to be outer edges and the pointer on
 	// one of them, close to the other.
@@ -145,35 +163,39 @@ func Hit(x, y int32, m Rect, open Open, enabled Zone) Zone {
 
 // Tracker turns the stream of zones the pointer is in into "open Task
 // View now" decisions. Task View opens once the pointer has stayed in a
-// zone for Delay, and only once per visit: it has to leave every zone
-// before it can trigger again, so resting in a corner never flickers Task
-// View open and shut.
+// zone for Delay, and only once per visit: after that the pointer has to
+// get RearmDistance away from every zone before it can trigger again, so
+// neither resting in a corner nor wobbling back into it while moving away
+// presses Win+Tab a second time, which would close Task View.
 type Tracker struct {
 	zone  Zone // the zone the pointer is in, None outside
 	fired bool // Task View was opened during this visit
 }
 
 // Move records that the pointer is now in zone z (None when it's in no
-// zone). arm reports that a new visit started and the caller should
-// (re)start its delay timer; disarm that the pointer left before the
-// timer ran out and the caller should stop it.
-func (t *Tracker) Move(z Zone) (arm, disarm bool) {
+// zone) and within RearmDistance of zone near (see Near). arm reports
+// that a new visit started and the caller should (re)start its delay
+// timer; disarm that the pointer left before the timer ran out and the
+// caller should stop it.
+func (t *Tracker) Move(z, near Zone) (arm, disarm bool) {
+	if t.fired {
+		// The visit, and with it the timer, is over; it only ends for
+		// good once the pointer is well clear of every zone.
+		t.zone = z
+		if z == None && near == None {
+			t.fired = false
+		}
+		return false, false
+	}
 	if z == t.zone {
 		return false, false
 	}
-	prev, fired := t.zone, t.fired
+	prev := t.zone
 	t.zone = z
-	switch {
-	case z == None:
-		t.fired = false
-		return false, prev != None && !fired
-	case fired:
-		// Sliding along an edge into a corner (or the other way round)
-		// is still the same visit.
-		return false, false
-	default:
-		return true, false
+	if z == None {
+		return false, prev != None
 	}
+	return true, false
 }
 
 // Elapsed is called when the delay timer runs out, and reports whether
