@@ -1,0 +1,178 @@
+package hotzone
+
+import (
+	"testing"
+	"time"
+)
+
+func TestParse(t *testing.T) {
+	tests := []struct {
+		in      string
+		want    Zone
+		wantErr bool
+	}{
+		{"top-left", TopLeft, false},
+		{"top-left, bottom-right", TopLeft | BottomRight, false},
+		{"Top_Right bottom", TopRight | Bottom, false},
+		{"left,right,top,bottom", Left | Right | Top | Bottom, false},
+		{"none", None, false},
+		{"", None, false},
+		{"top-left, top-left", TopLeft, false},
+		{"middle", None, true},
+		{"top-left, sideways", None, true},
+	}
+	for _, tt := range tests {
+		got, err := Parse(tt.in)
+		if (err != nil) != tt.wantErr || got != tt.want {
+			t.Errorf("Parse(%q) = %v, %v; want %v, error %t", tt.in, got, err, tt.want, tt.wantErr)
+		}
+	}
+}
+
+func TestStringRoundTrips(t *testing.T) {
+	for _, z := range []Zone{None, TopLeft, TopLeft | Right, TopLeft | TopRight | BottomLeft | BottomRight | Top | Bottom | Left | Right} {
+		back, err := Parse(z.String())
+		if err != nil || back != z {
+			t.Errorf("Parse(%q) = %v, %v; want %v", z.String(), back, err, z)
+		}
+	}
+	if got := (TopLeft | Right).String(); got != "top-left, right" {
+		t.Errorf("String() = %q, want %q", got, "top-left, right")
+	}
+}
+
+func TestHit(t *testing.T) {
+	m := Rect{0, 0, 1920, 1080}
+	all := Open{true, true, true, true}
+	every := TopLeft | TopRight | BottomLeft | BottomRight | Top | Bottom | Left | Right
+	tests := []struct {
+		name    string
+		x, y    int32
+		open    Open
+		enabled Zone
+		want    Zone
+	}{
+		{"exact top-left corner", 0, 0, all, TopLeft, TopLeft},
+		{"near the corner on the top edge", 5, 0, all, TopLeft, TopLeft},
+		{"near the corner on the left edge", 0, 7, all, TopLeft, TopLeft},
+		{"near the corner but off the edges", 3, 3, all, TopLeft, None},
+		{"past the corner size", 8, 0, all, TopLeft, None},
+		{"top-right corner", 1919, 0, all, every, TopRight},
+		{"bottom-left corner", 0, 1079, all, every, BottomLeft},
+		{"bottom-right corner", 1919, 1079, all, every, BottomRight},
+		{"corner not enabled", 0, 0, all, TopRight, None},
+		{"corner area counts for an enabled edge", 0, 0, all, Top, Top},
+		{"corner wins over edge", 0, 0, all, Top | TopLeft, TopLeft},
+		{"top edge", 960, 0, all, Top, Top},
+		{"bottom edge", 960, 1079, all, Bottom, Bottom},
+		{"left edge", 0, 500, all, Left, Left},
+		{"right edge", 1919, 500, all, Right, Right},
+		{"one pixel in from the edge", 960, 1, all, every, None},
+		{"middle of the screen", 960, 540, all, every, None},
+		{"edge shared with another monitor", 1919, 500, Open{true, true, false, true}, Right, None},
+		{"corner with a shared side", 1919, 0, Open{true, true, false, true}, TopRight, None},
+		{"corner with a shared side still counts for the open edge", 1919, 0, Open{true, true, false, true}, TopRight | Top, Top},
+		{"outside the monitor", 2000, 0, all, every, None},
+		{"nothing enabled", 0, 0, all, None, None},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Hit(tt.x, tt.y, m, tt.open, tt.enabled); got != tt.want {
+				t.Errorf("Hit(%d, %d) = %v, want %v", tt.x, tt.y, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHitOnASecondMonitor(t *testing.T) {
+	// A monitor left of the primary one has negative coordinates.
+	m := Rect{-1280, -200, 0, 824}
+	if got := Hit(-1280, -200, m, Open{Left: true, Top: true, Bottom: true}, TopLeft); got != TopLeft {
+		t.Errorf("Hit at the second monitor's top-left = %v, want top-left", got)
+	}
+}
+
+// step is one call to the Tracker in a scripted sequence: a move into a
+// zone, or the delay timer running out (elapsed).
+type step struct {
+	zone    Zone
+	elapsed bool
+	// What the call should return: arm/disarm for a move, fire for an
+	// elapsed timer.
+	arm, disarm, fire bool
+}
+
+func TestTracker(t *testing.T) {
+	tests := []struct {
+		name  string
+		steps []step
+	}{
+		{"enter, wait, fire once", []step{
+			{zone: TopLeft, arm: true},
+			{elapsed: true, fire: true},
+			{elapsed: true, fire: false},
+		}},
+		{"moving within the zone doesn't re-arm", []step{
+			{zone: TopLeft, arm: true},
+			{zone: TopLeft},
+			{elapsed: true, fire: true},
+		}},
+		{"leaving before the delay cancels", []step{
+			{zone: TopLeft, arm: true},
+			{zone: None, disarm: true},
+			{elapsed: true, fire: false},
+		}},
+		{"leaving after firing re-arms for the next visit", []step{
+			{zone: TopLeft, arm: true},
+			{elapsed: true, fire: true},
+			{zone: None},
+			{zone: TopLeft, arm: true},
+			{elapsed: true, fire: true},
+		}},
+		{"sliding into another zone after firing stays one visit", []step{
+			{zone: Top, arm: true},
+			{elapsed: true, fire: true},
+			{zone: TopLeft},
+			{elapsed: true, fire: false},
+		}},
+		{"sliding into another zone before firing restarts the delay", []step{
+			{zone: Top, arm: true},
+			{zone: TopLeft, arm: true},
+			{elapsed: true, fire: true},
+		}},
+		{"moving outside any zone does nothing", []step{
+			{zone: None},
+			{elapsed: true, fire: false},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var tr Tracker
+			for i, s := range tt.steps {
+				if s.elapsed {
+					if got := tr.Elapsed(); got != s.fire {
+						t.Fatalf("step %d: Elapsed() = %t, want %t", i, got, s.fire)
+					}
+					continue
+				}
+				arm, disarm := tr.Move(s.zone)
+				if arm != s.arm || disarm != s.disarm {
+					t.Fatalf("step %d: Move(%v) = %t, %t; want %t, %t", i, s.zone, arm, disarm, s.arm, s.disarm)
+				}
+			}
+		})
+	}
+}
+
+func TestTimer(t *testing.T) {
+	for _, tt := range []struct{ in, want time.Duration }{
+		{-time.Second, 10 * time.Millisecond},
+		{0, 10 * time.Millisecond},
+		{10 * time.Millisecond, 10 * time.Millisecond},
+		{250 * time.Millisecond, 250 * time.Millisecond},
+	} {
+		if got := Timer(tt.in); got != tt.want {
+			t.Errorf("Timer(%v) = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+}
